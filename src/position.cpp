@@ -8,6 +8,8 @@
 #define CV_GREEN cvScalar(0,255,0,0)
 #define CV_WHITE cvScalar(255,255,255,0)
 #define CV_BLACK cvScalar(0,0,0,0)
+#define CV_YELLOW cvScalar(0,255,255,0)
+#define CV_BLUE cvScalar(255,0,0,0)
 
 #define THRESHOLD 60
 
@@ -26,7 +28,7 @@ float point_distance_f(float x1, float y1, float x2, float y2);
 CvMat* find_useful_lines_kb(CvSeq* lines_s, int width, int height, 
 	int length = 50, float delt_k = 0.2, float delt_d_n = 20, float delt_d_p = 20); // delt_b=(0,1)
 CvPoint2D32f lines_cross_point(float k1, float b1, float k2, float b2);
-void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color = CV_RED);
+void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color = CV_RED, int thickness = 2);
 bool f_euqal(float a, float b);
 
 int color_threshold[5][6]={
@@ -175,17 +177,18 @@ int main(int argc, char **argv)
     lines_blue = cvHoughLines2(blue_canny, storage_blue_canny, CV_HOUGH_PROBABILISTIC, 1, CV_PI/180, 60, 50, 40);  
     cout<<"total lines "<<lines_blue->total<<endl;
 
-    for (int i = 0; i < lines_blue->total; i++)  
+    /***Draw lines**/
+    /*for (int i = 0; i < lines_blue->total; i++)  
     {  
         //point: line[0] and line[1]
         CvPoint* line = (CvPoint*)cvGetSeqElem(lines_blue, i);  
-        cvLine(color_blue, line[0], line[1], CV_RGB(30, 144, 255), 2, CV_AA, 0);  
-    }
+        cvLine(color_blue, line[0], line[1], CV_BLUE, 1, CV_AA, 0);  
+    }*/
 
 
     /***Find the useful lines***/
     CvMat* blue_lines_mat = find_useful_lines_kb(lines_blue, image_width, image_height, 60, 0.2, 20, 80);
-    draw_result_lines(blue_lines_mat, color_blue);
+    draw_result_lines(blue_lines_mat, color_blue, CV_BLUE);
     
     /***Cut the useless area***/
     float n_b_max = -100000.f;  //k is negative, value b when b is max
@@ -197,7 +200,7 @@ int main(int argc, char **argv)
     float p_b_min = 100000.f;
     float p_k_min = 0.f; 
 
-    for(int i = 1; i <= (int)CV_MAT_ELEM(*blue_lines_mat, float, 0, 0); i++)
+    for(int i = 1; i < CV_MAT_ELEM(*blue_lines_mat, float, 0, 0) + 1; i++)
     {
     	if(CV_MAT_ELEM(*blue_lines_mat, float, i, 0) < 0)
     	{
@@ -236,9 +239,9 @@ int main(int argc, char **argv)
 	            if((n_k_max*x-y+n_b_max) < 0 || (n_k_min*x-y+n_b_min) > 0)
 	            {
 	            	s2 = cvGet2D(fill_color,i,j); // get the (i,j) pixel value, rows, cols
-		            s2.val[0]=169;
-		            s2.val[1]=169;
-		            s2.val[2]=169;
+		            s2.val[0]=100;
+		            s2.val[1]=100;
+		            s2.val[2]=100;
 		            cvSet2D(fill_color,i,j,s2);//set the (i,j) pixel value
 	            }   
 	        }
@@ -258,15 +261,127 @@ int main(int argc, char **argv)
 	            if((p_k_max*x-y+p_b_max) > 0 || (p_k_min*x-y+p_b_min) > 0)
 	            {
 	            	s3 = cvGet2D(fill_color,i,j); // get the (i,j) pixel value, rows, cols
-		            s3.val[0]=169;
-		            s3.val[1]=169;
-		            s3.val[2]=169;
+		            s3.val[0]=100;
+		            s3.val[1]=100;
+		            s3.val[2]=100;
 		            cvSet2D(fill_color,i,j,s3);//set the (i,j) pixel value
 	            }   
 	        }
 	    }
     }
 
+
+
+    /*****Find yellow lines ******/
+    CvScalar s_yellow_black;
+    IplImage* yellow = cvCreateImage(cvGetSize(fill_color), 8, 1);
+
+    for(int i = 0;i < yellow->height;i++)
+    {
+        for(int j = 0;j < yellow->width;j++)
+        {
+            s_yellow_black = cvGet2D(fill_color,i,j); // get the (i,j) pixel value
+            if(s_yellow_black.val[0] == 86 && s_yellow_black.val[1] == 255 && s_yellow_black.val[2] == 255)
+            {
+                cvSet2D(yellow,i,j,CV_WHITE);//set the (i,j) pixel value
+            }
+            else 
+            {
+                cvSet2D(yellow,i,j,CV_BLACK);//set the (i,j) pixel value
+            }
+        }
+    }
+
+    cvErode( yellow,yellow, NULL, 1);   
+    cvDilate( yellow,yellow, NULL, 3);
+    
+    //find lines
+    IplImage* yellow_canny = cvCreateImage(cvGetSize(yellow), 8, 1);
+    cvCanny(yellow, yellow_canny, 100, 200, 3);
+
+    CvMemStorage* storage_yellow_canny = cvCreateMemStorage(0);  
+    CvSeq* lines_yellow = 0; 
+
+    IplImage* color_yellow = cvCreateImage(cvGetSize(yellow_canny), 8, 3); 
+    cvCvtColor( yellow_canny, color_yellow, CV_GRAY2BGR ); 
+
+    lines_yellow = cvHoughLines2(yellow_canny, storage_yellow_canny, CV_HOUGH_PROBABILISTIC, 1, CV_PI/180, 60, 50, 40);  
+    cout<<"total lines "<<lines_yellow->total<<endl;
+
+    /**Draw lines**/
+    /*for (int i = 0; i < lines_yellow->total; i++)  
+    {  
+        //point: line[0] and line[1]
+        CvPoint* line = (CvPoint*)cvGetSeqElem(lines_yellow, i);  
+        cvLine(color_yellow, line[0], line[1], CV_YELLOW, 1, CV_AA, 0);  
+    }*/
+
+
+    /***Find the useful lines***/
+    CvMat* yellow_lines_mat = find_useful_lines_kb(lines_yellow, image_width, image_height, 60, 0.2, 20, 80);
+    draw_result_lines(yellow_lines_mat, color_yellow, CV_YELLOW);
+
+
+    /***Classify negtive k lines and positive k lines***/
+    int yellow_lines_total = (int)CV_MAT_ELEM(*yellow_lines_mat, float, 0, 0 );
+
+    float negative_yellow_lines_array[yellow_lines_total][2];  //k,b  
+    float positive_yellow_lines_array[yellow_lines_total][2];  //k,b
+    int negative_k_total = 0;
+    int positive_k_total = 0;
+
+
+    for(int i = 1; i <= yellow_lines_total; i++)
+    {
+    	if(CV_MAT_ELEM(*yellow_lines_mat, float, i, 0 ) < 0.f)
+    	{
+    		negative_yellow_lines_array[negative_k_total][0] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 0 );
+    		negative_yellow_lines_array[negative_k_total][1] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 1 );
+    		negative_k_total ++;
+    		//cout<<"nk ("<<negative_yellow_lines_array[negative_k_total][0]<<","<<negative_yellow_lines_array[negative_k_total][1]<<")\n";
+    	}
+    }  
+
+    for(int i = 1; i <= yellow_lines_total; i++)
+    {
+    	if(CV_MAT_ELEM(*yellow_lines_mat, float, i, 0 ) >= 0.f)
+    	{
+    		positive_yellow_lines_array[positive_k_total][0] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 0 );
+    		positive_yellow_lines_array[positive_k_total][1] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 1 );
+    		positive_k_total ++;
+    		//cout<<"pk ("<<positive_yellow_lines_array[i-1][0]<<","<<positive_yellow_lines_array[i-1][1]<<")\n";
+    	}
+    }
+    cout<<"negative k lines: "<<negative_k_total<<endl;
+    cout<<"positive k lines: "<<positive_k_total<<endl;
+
+    /***Calculate Cross Points***/
+    int max_points_number = negative_k_total*positive_k_total;
+    int cross_points_yellow[max_points_number][2]; //(x,y)
+
+    for(int m = 0; m < negative_k_total; m++)
+    {
+    	for(int n = 0; n < positive_k_total; n++)
+    	{
+    	    float k1 = negative_yellow_lines_array[m][0];
+    	    float b1 = negative_yellow_lines_array[m][1];
+    	    float k2 = positive_yellow_lines_array[n][0];
+    	    float b2 = positive_yellow_lines_array[n][1];
+    	    //cout<<"("<<negative_yellow_lines_array[m][0]<<","<<b1<<";"<<k2<<","<<b2<<";\n";
+
+    		CvPoint2D32f temp_point = lines_cross_point(k1,b1,k2,b2);
+    		cross_points_yellow[m*positive_k_total+n][0] = (int)temp_point.x;
+    		cross_points_yellow[m*positive_k_total+n][1] = (int)temp_point.y;
+    		//cout<<"Point("<<m<<","<<m<<")=("<<cross_points_yellow[m*positive_k_total+n][0]<<","<<cross_points_yellow[m*positive_k_total+n][1]<<")\n";
+    	}
+    }
+
+    for(int i = 0; i < max_points_number; i++)
+    {
+    	int x = cross_points_yellow[i][0];
+    	int y = image_height - cross_points_yellow[i][1];
+    	cvCircle(color_yellow, cvPoint(x, y), 10, CV_GREEN, 2);
+    }
 
 
     
@@ -276,12 +391,11 @@ int main(int argc, char **argv)
 	cvShowImage("image_raw",image_raw);
 	cvNamedWindow("fill_color");
 	cvShowImage("fill_color",fill_color);
-	cvNamedWindow("blue");
-	cvShowImage("blue",blue);
-	cvNamedWindow("blue_canny");
-	cvShowImage("blue_canny",blue_canny);
+
 	cvNamedWindow("color_blue");
 	cvShowImage("color_blue",color_blue);
+	cvNamedWindow("color_yellow");
+	cvShowImage("color_yellow",color_yellow);
     
     cvWaitKey(0);
 
@@ -289,14 +403,19 @@ int main(int argc, char **argv)
     cvReleaseImage(&image_raw);
     cvDestroyWindow("fill_color");
     cvReleaseImage(&fill_color);
-    cvDestroyWindow("blue");
+
     cvReleaseImage(&blue);
-    cvDestroyWindow("blue_canny");
     cvReleaseImage(&blue_canny);
     cvDestroyWindow("color_blue");
     cvReleaseImage(&color_blue);
 
+    cvReleaseImage(&yellow);
+    cvReleaseImage(&yellow_canny);
+    cvDestroyWindow("color_yellow");
+    cvReleaseImage(&color_yellow);
+
     cvReleaseMat(&blue_lines_mat);
+    cvReleaseMat(&yellow_lines_mat);
 
   	cout<<"finished"<<endl;
 	
@@ -416,7 +535,7 @@ CvMat* find_useful_lines_kb(CvSeq* lines_s, int width, int height, int length, f
 }
 
 
-void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color)
+void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color, int thickness)
 {
 	for(int i = 1; i <= CV_MAT_ELEM(*lines_mat, float, 0, 0 ); i++)
     {
@@ -468,6 +587,6 @@ void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color)
     	//translate to image coordinate
         p1.y = image_height - p1.y;
         p2.y = image_height - p2.y;
-    	cvLine(image, p1, p2 , color, 1, CV_AA, 0);
+    	cvLine(image, p1, p2 , color, thickness, CV_AA, 0);
     }
 }
