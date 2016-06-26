@@ -16,8 +16,8 @@
 #define image_width 1280
 #define image_height 720
 
-bool camera_left_side = true;
-bool camera_enermy_side = true;
+bool camera_left_side = false;
+bool camera_enemy_side = true;
 
 using namespace std;
 using namespace cv;
@@ -38,6 +38,12 @@ int color_threshold[5][6]={
 	0,0,0,0,0,0,
 	0,0,0,0,0,0
 };
+
+
+
+float cross_points_real_position_right_enemy[5][5][2];
+float cross_points_real_position_left_enemy[5][5][2];
+
 
 int main(int argc, char **argv)
 {
@@ -318,7 +324,7 @@ int main(int argc, char **argv)
 
 
     /***Find the useful lines***/
-    CvMat* yellow_lines_mat = find_useful_lines_kb(lines_yellow, image_width, image_height, 60, 0.2, 20, 80);
+    CvMat* yellow_lines_mat = find_useful_lines_kb(lines_yellow, image_width, image_height, 60, 0.2, 20, 20);
     draw_result_lines(yellow_lines_mat, color_yellow, CV_YELLOW);
 
 
@@ -355,6 +361,39 @@ int main(int argc, char **argv)
     cout<<"negative k lines: "<<negative_k_total<<endl;
     cout<<"positive k lines: "<<positive_k_total<<endl;
 
+    /***Rank array by b, from large to small***/
+    for(int i = 0; i < negative_k_total - 1; i++)
+    {
+    	for(int j = i + 1; j < negative_k_total; j++)
+    	{
+    		if(negative_yellow_lines_array[i][1] < negative_yellow_lines_array[j][1])
+    		{
+    			float temp1 = negative_yellow_lines_array[j][1];
+    			float temp2 = negative_yellow_lines_array[j][0];
+    			negative_yellow_lines_array[j][1] = negative_yellow_lines_array[i][1];
+    			negative_yellow_lines_array[j][0] = negative_yellow_lines_array[i][0];
+    			negative_yellow_lines_array[i][1] = temp1;
+    			negative_yellow_lines_array[i][0] = temp2;
+    		}
+    	}
+    }
+
+    for(int i = 0; i < positive_k_total - 1; i++)
+    {
+    	for(int j = i + 1; j < positive_k_total; j++)
+    	{
+    		if(positive_yellow_lines_array[i][1] < positive_yellow_lines_array[j][1])
+    		{
+    			float temp1 = positive_yellow_lines_array[j][1];
+    			float temp2 = positive_yellow_lines_array[j][0];
+    			positive_yellow_lines_array[j][1] = positive_yellow_lines_array[i][1];
+    			positive_yellow_lines_array[j][0] = positive_yellow_lines_array[i][0];
+    			positive_yellow_lines_array[i][1] = temp1;
+    			positive_yellow_lines_array[i][0] = temp2;
+    		}
+    	}
+    }
+
     /***Calculate Cross Points***/
     int max_points_number = negative_k_total*positive_k_total;
     int cross_points_yellow[max_points_number][2]; //(x,y)
@@ -374,13 +413,176 @@ int main(int argc, char **argv)
     		cross_points_yellow[m*positive_k_total+n][1] = (int)temp_point.y;
     		//cout<<"Point("<<m<<","<<m<<")=("<<cross_points_yellow[m*positive_k_total+n][0]<<","<<cross_points_yellow[m*positive_k_total+n][1]<<")\n";
     	}
+
     }
 
-    for(int i = 0; i < max_points_number; i++)
+    /***Find Useful Points***/
+    int alfa_point[2];
+    int beta_point[2];
+    int gamma_point[2];
+    int theta_point[2];
+    int width_point_delt_x = 0;
+    int width_point_delt_y = 0;
+    int length_point_delt_x = 0;
+    int length_point_delt_y = 0;
+    float delt_x_scale = 0.2f;
+    float delt_y_scale = 0.2f;
+    float dist_threshold = 40.f;
+
+    int cross_points_position_right_enemy[5][5][2] = {0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0}; //(image_x, image_y)
+    int cross_points_position_left_enemy[5][5][2] = {0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0}; //(image_x, image_y)
+
+    if(!camera_left_side) //right, enemy
+    {
+    	alfa_point[0] = cross_points_yellow[0][0];
+    	alfa_point[1] = cross_points_yellow[0][1];
+    	beta_point[0] = cross_points_yellow[positive_k_total][0];
+    	beta_point[1] = cross_points_yellow[positive_k_total][1];
+    	gamma_point[0] = cross_points_yellow[1][0];
+    	gamma_point[1] = cross_points_yellow[1][1];
+    	theta_point[0] = cross_points_yellow[positive_k_total+1][0];
+    	theta_point[1] = cross_points_yellow[positive_k_total+1][1];
+  	
+    	//first line 
+    	width_point_delt_x = gamma_point[0] - alfa_point[0];
+    	width_point_delt_y = gamma_point[1] - alfa_point[1];
+
+		cross_points_position_right_enemy[0][0][0] = alfa_point[0];
+		cross_points_position_right_enemy[0][0][1] = alfa_point[1];    	
+    	for(int i = 1; i < 5; i++)
+    	{
+    		//predict position
+    		int predict_x = cross_points_position_right_enemy[0][i-1][0] + (int)(width_point_delt_x * (1 + delt_x_scale));
+    		int predict_y = cross_points_position_right_enemy[0][i-1][1] + (int)(width_point_delt_y * (1 + delt_y_scale));
+    		dist_threshold = (abs(width_point_delt_x) + abs(width_point_delt_y))/5.f;
+    		int near_points_counter = 0;
+    		for(int j = 0; j < max_points_number; j++)
+    		{
+    			if(point_distance(predict_x, predict_y, cross_points_yellow[j][0], cross_points_yellow[j][1]) < dist_threshold)
+    			{
+    				cross_points_position_right_enemy[0][i][0] += cross_points_yellow[j][0];
+    				cross_points_position_right_enemy[0][i][1] += cross_points_yellow[j][1];
+    				near_points_counter ++;
+    			}
+    		}
+    		if(near_points_counter > 0)
+    		{
+    			cross_points_position_right_enemy[0][i][0] = cross_points_position_right_enemy[0][i][0]/near_points_counter;
+    			cross_points_position_right_enemy[0][i][1] = cross_points_position_right_enemy[0][i][1]/near_points_counter;	
+    		}
+    		else
+    		{
+    			cross_points_position_right_enemy[0][i][0] = predict_x;
+    			cross_points_position_right_enemy[0][i][1] = predict_y;
+    		}	
+
+    		width_point_delt_x = cross_points_position_right_enemy[0][i][0] - cross_points_position_right_enemy[0][i-1][0];
+    		width_point_delt_y = cross_points_position_right_enemy[0][i][1] - cross_points_position_right_enemy[0][i-1][1];
+    		cout<<"a time \n";
+    	}
+
+    	//second line 
+    	width_point_delt_x = theta_point[0] - beta_point[0];
+    	width_point_delt_y = theta_point[1] - beta_point[1];
+
+    	cross_points_position_right_enemy[1][0][0] = beta_point[0];
+		cross_points_position_right_enemy[1][0][1] = beta_point[1];    	
+    	for(int i = 1; i < 5; i++)
+    	{
+    		//predict position
+    		int predict_x = cross_points_position_right_enemy[1][i-1][0] + (int)(width_point_delt_x * (1 + delt_x_scale));
+    		int predict_y = cross_points_position_right_enemy[1][i-1][1] + (int)(width_point_delt_y * (1 + delt_y_scale));
+    		dist_threshold = (abs(width_point_delt_x) + abs(width_point_delt_y))/5.f;
+    		int near_points_counter = 0;
+    		for(int j = 0; j < max_points_number; j++)
+    		{
+    			if(point_distance(predict_x, predict_y, cross_points_yellow[j][0], cross_points_yellow[j][1]) < dist_threshold)
+    			{
+    				cross_points_position_right_enemy[1][i][0] += cross_points_yellow[j][0];
+    				cross_points_position_right_enemy[1][i][1] += cross_points_yellow[j][1];
+    				near_points_counter ++;
+    			}
+    		}
+    		if(near_points_counter > 0)
+    		{
+    			cross_points_position_right_enemy[1][i][0] = cross_points_position_right_enemy[1][i][0]/near_points_counter;
+    			cross_points_position_right_enemy[1][i][1] = cross_points_position_right_enemy[1][i][1]/near_points_counter;	
+    		}
+    		else
+    		{
+    			cross_points_position_right_enemy[1][i][0] = predict_x;
+    			cross_points_position_right_enemy[1][i][1] = predict_y;
+    		}	
+
+    		width_point_delt_x = cross_points_position_right_enemy[1][i][0] - cross_points_position_right_enemy[1][i-1][0];
+    		width_point_delt_y = cross_points_position_right_enemy[1][i][1] - cross_points_position_right_enemy[1][i-1][1];
+    		cout<<"a time \n";
+    	}
+        
+        
+    	//other lines
+    	for(int j = 0; j < 5; j++)
+    	{
+    		length_point_delt_x = cross_points_position_right_enemy[1][j][0]- cross_points_position_right_enemy[0][j][0];
+    		length_point_delt_y = cross_points_position_right_enemy[1][j][1]- cross_points_position_right_enemy[0][j][1];
+            cout<<"length_point_delt="<<length_point_delt_x<<","<<length_point_delt_y<<" * ";
+    		
+    		for(int i = 2; i < 5; i++)
+	    	{
+	    		int predict_x = cross_points_position_right_enemy[i-1][j][0] + (int)(length_point_delt_x * (1 + delt_x_scale));
+	    		int predict_y = cross_points_position_right_enemy[i-1][j][1] + (int)(length_point_delt_y * (1 + delt_y_scale));
+	    		cout<<"("<<i<<","<<j<<")=("<<predict_x<<","<<predict_y<<")    ";
+
+	    		dist_threshold = (abs(length_point_delt_x) + abs(length_point_delt_y))/3.f;
+	    		int near_points_counter = 0;
+	    		for(int m = 0; m < max_points_number; m++)
+	    		{
+	    			if(point_distance(predict_x, predict_y, cross_points_yellow[m][0], cross_points_yellow[m][1]) < dist_threshold)
+	    			{
+	    				cross_points_position_right_enemy[i][j][0] += cross_points_yellow[m][0];
+	    				cross_points_position_right_enemy[i][j][1] += cross_points_yellow[m][1];
+	    				near_points_counter ++;
+	    			}
+	    		}
+	    		if(near_points_counter > 0)
+	    		{
+	    			cross_points_position_right_enemy[i][j][0] = cross_points_position_right_enemy[i][j][0]/near_points_counter;
+	    			cross_points_position_right_enemy[i][j][1] = cross_points_position_right_enemy[i][j][1]/near_points_counter;	
+	    		}
+	    		else
+	    		{
+	    			cross_points_position_right_enemy[i][j][0] = predict_x;
+	    			cross_points_position_right_enemy[i][j][1] = predict_y;
+	    		}	
+
+	    		length_point_delt_x = cross_points_position_right_enemy[i][j][0] - cross_points_position_right_enemy[i-1][j][0];
+	    		length_point_delt_y = cross_points_position_right_enemy[i][j][1] - cross_points_position_right_enemy[i-1][j][1];
+	    	    cout<<"length_point_delt="<<length_point_delt_x<<","<<length_point_delt_y<<" # ";
+	    	}
+    	}
+    		
+    }
+
+
+
+    /***Draw cross points***/
+
+    /*for(int i = 0; i < max_points_number; i++)
     {
     	int x = cross_points_yellow[i][0];
     	int y = image_height - cross_points_yellow[i][1];
     	cvCircle(color_yellow, cvPoint(x, y), 10, CV_GREEN, 2);
+    }*/
+
+    for(int i = 0; i < 5; i++)
+    {
+    	for(int j = 0; j < 5; j++)
+    	{
+    		int x = cross_points_position_right_enemy[i][j][0];
+    		int y = image_height - cross_points_position_right_enemy[i][j][1];
+    		cvCircle(color_yellow, cvPoint(x, y), 10, CV_GREEN, 2);
+    	}
+    	
     }
 
 
