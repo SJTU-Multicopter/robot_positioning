@@ -19,17 +19,26 @@
 bool camera_left_side = false;
 bool camera_enemy_side = true;
 
+float robot_image_p[2] = {0.f, 0.f};
+float robot_real_p[2] = {0.f, 0.f};
+
 using namespace std;
 using namespace cv;
 
 float point_distance(int x1, int y1, int x2, int y2);
+
 float point_distance_f(float x1, float y1, float x2, float y2);
 
 CvMat* find_useful_lines_kb(CvSeq* lines_s, int width, int height, 
 	int length = 50, float delt_k = 0.2, float delt_d_n = 20, float delt_d_p = 20); // delt_b=(0,1)
+
 CvPoint2D32f lines_cross_point(float k1, float b1, float k2, float b2);
+
 void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color = CV_RED, int thickness = 2);
+
 bool f_euqal(float a, float b);
+
+CvPoint2D32f point_slant_coordinate_tranlate(float kx, float ky, float x0, float y0);
 
 int color_threshold[5][6]={
 	60,130,50,255,50,255,
@@ -41,7 +50,14 @@ int color_threshold[5][6]={
 
 
 
-float cross_points_real_position_right_enemy[5][5][2];
+float cross_points_real_position_right_enemy[5][5][2] = {
+	5.f, 2.f, 5.f, 1.f, 5.f, 0.f, 5.f, -1.f, 5.f, -2.f,
+	4.f, 2.f, 4.f, 1.f, 4.f, 0.f, 4.f, -1.f, 4.f, -2.f,
+	3.f, 2.f, 3.f, 1.f, 3.f, 0.f, 3.f, -1.f, 3.f, -2.f,
+	2.f, 2.f, 2.f, 1.f, 2.f, 0.f, 2.f, -1.f, 2.f, -2.f,
+	1.f, 2.f, 1.f, 1.f, 1.f, 0.f, 1.f, -1.f, 1.f, -2.f
+};
+
 float cross_points_real_position_left_enemy[5][5][2];
 
 
@@ -145,6 +161,7 @@ int main(int argc, char **argv)
 
         }
     }
+
 
 
     /*****Find blue lines ******/
@@ -276,6 +293,66 @@ int main(int argc, char **argv)
 	    }
     }
 
+    /***Find robot***/
+    CvScalar s_red_black;
+    IplImage* red = cvCreateImage(cvGetSize(fill_color), 8, 1);
+
+    for(int i = 0;i < red->height;i++)
+    {
+        for(int j = 0;j < red->width;j++)
+        {
+            s_red_black = cvGet2D(fill_color,i,j); // get the (i,j) pixel value
+            if(s_red_black.val[0] == 0 && s_red_black.val[1] == 0 && s_red_black.val[2] == 255)
+            {
+                cvSet2D(red,i,j,CV_WHITE);//set the (i,j) pixel value
+            }
+            else 
+            {
+                cvSet2D(red,i,j,CV_BLACK);//set the (i,j) pixel value
+            }
+        }
+    }
+    
+
+    cvErode( red, red, NULL, 1);   
+    cvDilate( red, red, NULL, 1);
+
+    CvPoint2D32f robot_center;  
+    float radius;
+
+    CvMemStorage* red_storage = cvCreateMemStorage(0);
+    CvSeq* red_contours = 0;
+    int contour_num = cvFindContours(red, red_storage, &red_contours, sizeof(CvContour), CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+    cout<<"contour_num="<<contour_num<<endl;
+    if(contour_num > 0)
+    {
+    	cvDrawContours(fill_color, red_contours, CV_GREEN, CV_GREEN, 50);
+
+    	CvSeq *c = 0;
+    	bool found = false;
+    	for (c = red_contours;c !=NULL;c = c->h_next)
+    	{
+    		double area = fabs(cvContourArea(c,CV_WHOLE_SEQ));
+    		if(area > 200)
+    		{
+    			cvMinEnclosingCircle(c,&robot_center,&radius); 
+				cvCircle(fill_color,cvPointFrom32f(robot_center),4,CV_GREEN,4);
+				robot_image_p[0] = robot_center.x;
+				robot_image_p[1] = image_height - robot_center.y;
+				found = true;
+    		}
+    		if(!found) 
+    		{
+    			robot_image_p[0] = 0.f;
+				robot_image_p[1] = 0.f;
+    		}
+    	}
+    }
+    else
+    {
+    	robot_image_p[0] = 0.f;
+		robot_image_p[1] = 0.f;
+    }
 
 
     /*****Find yellow lines ******/
@@ -299,7 +376,7 @@ int main(int argc, char **argv)
     }
 
     cvErode( yellow,yellow, NULL, 1);   
-    cvDilate( yellow,yellow, NULL, 3);
+    cvDilate( yellow,yellow, NULL, 1);
     
     //find lines
     IplImage* yellow_canny = cvCreateImage(cvGetSize(yellow), 8, 1);
@@ -336,6 +413,8 @@ int main(int argc, char **argv)
     int negative_k_total = 0;
     int positive_k_total = 0;
 
+    float negative_k_average = 0.f;
+    float positive_k_average = 0.f;
 
     for(int i = 1; i <= yellow_lines_total; i++)
     {
@@ -343,10 +422,12 @@ int main(int argc, char **argv)
     	{
     		negative_yellow_lines_array[negative_k_total][0] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 0 );
     		negative_yellow_lines_array[negative_k_total][1] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 1 );
+    		negative_k_average += negative_yellow_lines_array[negative_k_total][0];
     		negative_k_total ++;
     		//cout<<"nk ("<<negative_yellow_lines_array[negative_k_total][0]<<","<<negative_yellow_lines_array[negative_k_total][1]<<")\n";
     	}
-    }  
+    } 
+    negative_k_average = negative_k_average / negative_k_total;
 
     for(int i = 1; i <= yellow_lines_total; i++)
     {
@@ -354,10 +435,13 @@ int main(int argc, char **argv)
     	{
     		positive_yellow_lines_array[positive_k_total][0] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 0 );
     		positive_yellow_lines_array[positive_k_total][1] = CV_MAT_ELEM(*yellow_lines_mat, float, i, 1 );
+    		positive_k_average += positive_yellow_lines_array[positive_k_total][0];
     		positive_k_total ++;
     		//cout<<"pk ("<<positive_yellow_lines_array[i-1][0]<<","<<positive_yellow_lines_array[i-1][1]<<")\n";
     	}
     }
+    positive_k_average = positive_k_average / positive_k_total;
+
     cout<<"negative k lines: "<<negative_k_total<<endl;
     cout<<"positive k lines: "<<positive_k_total<<endl;
 
@@ -478,7 +562,7 @@ int main(int argc, char **argv)
 
     		width_point_delt_x = cross_points_position_right_enemy[0][i][0] - cross_points_position_right_enemy[0][i-1][0];
     		width_point_delt_y = cross_points_position_right_enemy[0][i][1] - cross_points_position_right_enemy[0][i-1][1];
-    		cout<<"a time \n";
+    		//cout<<"a time \n";
     	}
 
     	//second line 
@@ -516,7 +600,7 @@ int main(int argc, char **argv)
 
     		width_point_delt_x = cross_points_position_right_enemy[1][i][0] - cross_points_position_right_enemy[1][i-1][0];
     		width_point_delt_y = cross_points_position_right_enemy[1][i][1] - cross_points_position_right_enemy[1][i-1][1];
-    		cout<<"a time \n";
+    		//cout<<"a time \n";
     	}
         
         
@@ -525,13 +609,13 @@ int main(int argc, char **argv)
     	{
     		length_point_delt_x = cross_points_position_right_enemy[1][j][0]- cross_points_position_right_enemy[0][j][0];
     		length_point_delt_y = cross_points_position_right_enemy[1][j][1]- cross_points_position_right_enemy[0][j][1];
-            cout<<"length_point_delt="<<length_point_delt_x<<","<<length_point_delt_y<<" * ";
+            //cout<<"length_point_delt="<<length_point_delt_x<<","<<length_point_delt_y<<" * ";
     		
     		for(int i = 2; i < 5; i++)
 	    	{
 	    		int predict_x = cross_points_position_right_enemy[i-1][j][0] + (int)(length_point_delt_x * (1 + delt_x_scale));
 	    		int predict_y = cross_points_position_right_enemy[i-1][j][1] + (int)(length_point_delt_y * (1 + delt_y_scale));
-	    		cout<<"("<<i<<","<<j<<")=("<<predict_x<<","<<predict_y<<")    ";
+	    		//cout<<"("<<i<<","<<j<<")=("<<predict_x<<","<<predict_y<<")    ";
 
 	    		dist_threshold = (abs(length_point_delt_x) + abs(length_point_delt_y))/3.f;
 	    		int near_points_counter = 0;
@@ -557,22 +641,89 @@ int main(int argc, char **argv)
 
 	    		length_point_delt_x = cross_points_position_right_enemy[i][j][0] - cross_points_position_right_enemy[i-1][j][0];
 	    		length_point_delt_y = cross_points_position_right_enemy[i][j][1] - cross_points_position_right_enemy[i-1][j][1];
-	    	    cout<<"length_point_delt="<<length_point_delt_x<<","<<length_point_delt_y<<" # ";
+	    	    //cout<<"length_point_delt="<<length_point_delt_x<<","<<length_point_delt_y<<" # ";
 	    	}
     	}
+
+    	
+    	/***Calculate real position ***/
+    	if(robot_image_p[0] > 0.001) //image_position
+    	{	
+	    	//rank crosspoints by distance to robot, from small to large
+	    	float distance_temp[5][5];
+	    	for(int i = 0; i < 5; i++)
+	    	{
+	    		for(int j = 0; j < 5; j++)
+	    		{
+	    			distance_temp[i][j] = point_distance_f(robot_image_p[0], robot_image_p[1], cross_points_position_right_enemy[i][j][0], cross_points_position_right_enemy[i][j][1]);
+	    		}
+	    	}
+	    	//nearest point
+	    	float min_distance = 10000.f;
+	    	int min_row, min_col;
+	    	for(int i = 0; i < 5; i++)
+	    	{
+	    		for(int j = 0; j < 5; j++)
+	    		{
+	    			if(distance_temp[i][j] < min_distance)
+	    			{
+	    				min_distance = distance_temp[i][j];
+	    				min_row = i;
+	    				min_col = j;
+	    			}
+	    		}
+	    	}
+	    	//second nearest point with different row and col
+	    	float min_distance_2 = 10000.f;
+	    	int min_row_2, min_col_2;
+	    	for(int i = 0; i < 5; i++)
+	    	{
+	    		for(int j = 0; j < 5; j++)
+	    		{
+	    			if(distance_temp[i][j] < min_distance_2 && distance_temp[i][j] > min_distance && i!= min_row && j!=min_col)
+	    			{
+	    				min_distance_2 = distance_temp[i][j];
+	    				min_row_2 = i;
+	    				min_col_2 = j;
+	    			}
+	    		}
+	    	}
+
+
+	    	//when right side
+	    	CvPoint2D32f min_dist_p1_tr = point_slant_coordinate_tranlate(positive_k_average, negative_k_average, cross_points_position_right_enemy[min_row][min_col][0], cross_points_position_right_enemy[min_row][min_col][1]);
+	    	CvPoint2D32f min_dist_p2_tr = point_slant_coordinate_tranlate(positive_k_average, negative_k_average, cross_points_position_right_enemy[min_row_2][min_col_2][0], cross_points_position_right_enemy[min_row_2][min_col_2][1]);
+	    	CvPoint2D32f robot_image_p_tr = point_slant_coordinate_tranlate(positive_k_average, negative_k_average, robot_image_p[0], robot_image_p[1]);
+
+	    	float kx = (cross_points_real_position_right_enemy[min_row][min_col][0] - cross_points_real_position_right_enemy[min_row_2][min_col_2][0]) / (min_dist_p1_tr.x - min_dist_p2_tr.x);
+	    	float ky = (cross_points_real_position_right_enemy[min_row][min_col][1] - cross_points_real_position_right_enemy[min_row_2][min_col_2][1]) / (min_dist_p1_tr.y - min_dist_p2_tr.y);
+	    	
+	    	robot_real_p[0] = (cross_points_real_position_right_enemy[min_row][min_col][0] + kx*(robot_image_p_tr.x - min_dist_p1_tr.x) + cross_points_real_position_right_enemy[min_row_2][min_col_2][0] + kx*(robot_image_p_tr.x - min_dist_p2_tr.x))/2.f;
+			robot_real_p[1] = (cross_points_real_position_right_enemy[min_row][min_col][1] + ky*(robot_image_p_tr.y - min_dist_p1_tr.y) + cross_points_real_position_right_enemy[min_row_2][min_col_2][1] + ky*(robot_image_p_tr.y - min_dist_p2_tr.y))/2.f;
+
+	    	//position calculate
+	    	//cout<<"\n &"<<min_row<<" & "<< min_col << endl;	
+	    	//cout<<"\n &"<<min_row_2<<" & "<< min_col_2 << endl;	
+
+	    	//cout<<"Point1 Position = ("<<cross_points_real_position_right_enemy[min_row][min_col][0]<<","<<cross_points_real_position_right_enemy[min_row][min_col][1]<<")\n";
+	    	//cout<<"Point2 Position = ("<<cross_points_real_position_right_enemy[min_row_2][min_col_2][0]<<","<<cross_points_real_position_right_enemy[min_row_2][min_col_2][1]<<")\n";
+            cout<<"Robot Real Position = ("<<robot_real_p[0]<<","<<robot_real_p[1]<<")\n";
+            cvCircle(color_yellow, cvPoint(cross_points_position_right_enemy[min_row][min_col][0], image_height - cross_points_position_right_enemy[min_row][min_col][1]), 4, CV_GREEN, 6);
+            cvCircle(color_yellow, cvPoint(cross_points_position_right_enemy[min_row_2][min_col_2][0], image_height - cross_points_position_right_enemy[min_row_2][min_col_2][1]), 4, CV_GREEN, 6);
+    	}
+    	else 
+    	{
+    		cout<<"Can not find robot!!"<<endl;
+    		robot_real_p[0] = -1000.f;
+    		robot_real_p[1] = -1000.f;
+    	}
+    	
     		
     }
 
 
 
     /***Draw cross points***/
-
-    /*for(int i = 0; i < max_points_number; i++)
-    {
-    	int x = cross_points_yellow[i][0];
-    	int y = image_height - cross_points_yellow[i][1];
-    	cvCircle(color_yellow, cvPoint(x, y), 10, CV_GREEN, 2);
-    }*/
 
     for(int i = 0; i < 5; i++)
     {
@@ -584,7 +735,7 @@ int main(int argc, char **argv)
     	}
     	
     }
-
+    cvCircle(color_yellow, cvPoint((int)robot_image_p[0], image_height - (int)robot_image_p[1]), 10, CV_RED, 2);
 
     
 
@@ -615,6 +766,8 @@ int main(int argc, char **argv)
     cvReleaseImage(&yellow_canny);
     cvDestroyWindow("color_yellow");
     cvReleaseImage(&color_yellow);
+
+    cvReleaseImage(&red);
 
     cvReleaseMat(&blue_lines_mat);
     cvReleaseMat(&yellow_lines_mat);
@@ -791,4 +944,18 @@ void draw_result_lines(CvMat *lines_mat, IplImage* image, CvScalar color, int th
         p2.y = image_height - p2.y;
     	cvLine(image, p1, p2 , color, thickness, CV_AA, 0);
     }
+}
+
+CvPoint2D32f point_slant_coordinate_tranlate(float kx, float ky, float x0, float y0)
+{
+	CvPoint2D32f x_crossp = lines_cross_point(ky, y0-ky*x0, kx, 0.f);
+	CvPoint2D32f y_crossp = lines_cross_point(kx, y0-kx*x0, ky, 0.f);
+	CvPoint2D32f result_p;
+	result_p.x = point_distance_f(x_crossp.x, x_crossp.y, 0.f, 0.f);
+	result_p.y = point_distance_f(y_crossp.x, y_crossp.y, 0.f, 0.f);
+
+	if((x0 - y0 / ky) < 0) result_p.x = 0.f - result_p.x;
+	if((x0 - y0 / kx) < 0) result_p.y = 0.f - result_p.y;
+
+	return result_p;
 }
